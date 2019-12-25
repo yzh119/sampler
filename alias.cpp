@@ -265,14 +265,16 @@ public:
     }
 };
 
+const int num_categories = 10000000;//100000;
+const int num_rolls = 10000000;//100000000;
+const bool replace = false;
+std::vector<float> prob;
+std::vector<int> cnt(num_categories, 0);
+
 int main(int argc, char** argv) {
     RandomEngine re;
     using clock = std::chrono::system_clock;
     using millisec = std::chrono::duration<float, std::milli>;
-    const int num_categories = 4000000;//100000;
-    const int num_rolls = 4000000;//100000000;
-    const bool replace = false;
-    std::vector<float> prob;
     float sum_prob = 0;
     for (int i = 0; i < num_categories; ++i) {
         prob.push_back(re.Uniform<float>(0, 1));
@@ -289,8 +291,7 @@ int main(int argc, char** argv) {
     AliasSampler<int, float, replace> as1(prob, &re);
     millisec dur = clock::now() - tic;
     std::cout << "Alias sampler building time: " << dur.count() << " ms" << std::endl;
-    int cnt[num_categories];
-    std::fill(cnt, cnt + num_categories, 0);
+    std::fill(cnt.begin(), cnt.end(), 0);
     tic = clock::now();
     for (int i = 0; i < num_rolls; ++i) {
         int dice = as1.draw();
@@ -308,7 +309,7 @@ int main(int argc, char** argv) {
     CDFSampler<int, float, replace> cs1(prob, &re);
     dur = clock::now() - tic;
     std::cout << "CDF sampler building time: " << dur.count() << " ms" << std::endl;
-    std::fill(cnt, cnt + num_categories, 0);
+    std::fill(cnt.begin(), cnt.end(), 0);
     tic = clock::now();
     for (int i = 0; i < num_rolls; ++i) {
         int dice = cs1.draw();
@@ -326,7 +327,7 @@ int main(int argc, char** argv) {
     TreeSampler<int, float, replace> ts1(prob, &re);
     dur = clock::now() - tic;
     std::cout << "Tree sampler building time: " << dur.count() << " ms" << std::endl;
-    std::fill(cnt, cnt + num_categories, 0);
+    std::fill(cnt.begin(), cnt.end(), 0);
     tic = clock::now();
     for (int i = 0; i < num_rolls; ++i) {
         int dice = ts1.draw();
