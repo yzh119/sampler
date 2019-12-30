@@ -6,20 +6,25 @@
 #include <cstdlib>
 #include <cassert>
 #include <chrono>
+#include <random>
+#include <cmath>
 //#define _DEBUG
 
 
 class RandomEngine {
 public:
   /*! \brief Constructor with default seed */
-  RandomEngine() {}
+  RandomEngine() {
+    rng_.seed(42);
+  }
 
   /*!
   * \brief Generate a uniform random integer in [lower, upper)
   */
   template<typename T>
   T RandInt(T lower, T upper) {
-    return rand() % (upper - lower) + lower; 
+    std::uniform_int_distribution<T> dist(lower, upper - 1);
+    return dist(rng_);
   }
 
   /*!
@@ -27,8 +32,11 @@ public:
   */
   template<typename T>
   T Uniform(T lower, T upper) {
-    return (static_cast<T>(rand()) / static_cast<T>(RAND_MAX)) * (upper - lower) + lower;
+    std::uniform_real_distribution<T> dist(lower, upper);
+    return dist(rng_);
   }
+private:
+  std::mt19937 rng_;
 };
 
 template <
@@ -37,6 +45,7 @@ template <
   bool replace = true>
 class AliasSampler {
 private:
+  RandomEngine *re;
   Idx N;
   DType accum, taken, eps;        // accumulated likelihood
   std::vector<Idx> K;             // alias table
@@ -104,20 +113,21 @@ public:
     rebuild(prob);
   }
 
-  AliasSampler(const std::vector<DType>& prob, DType eps=1e-12): eps(eps) {
+  AliasSampler(RandomEngine* re, const std::vector<DType>& prob, DType eps=1e-12): re(re), eps(eps) {
     reinit_state(prob);
   }
 
   ~AliasSampler() {}
 
-  inline Idx draw(RandomEngine *re) {
+  inline Idx draw() {
     DType avg = accum / N;
     if (!replace) {
       if (2 * taken >= accum)
         rebuild(_prob);
       while (true) {
-        Idx i = re->RandInt<Idx>(0, N), rst;
-        DType p = re->Uniform<DType>(0., avg), cap = 0.;
+        DType dice = re->Uniform<DType>(0, N); 
+        Idx i = static_cast<Idx>(dice), rst;
+        DType p = (dice - i) * avg, cap;
         if (p <= U[map(i)]) {
           cap = U[map(i)];
           rst = map(i);
@@ -132,12 +142,13 @@ public:
         }
       }
     }
-    Idx i = re->RandInt<Idx>(0, N);
-    DType p = re->Uniform<DType>(0., avg);
-    if (p <= U[map(i)])
-      return map(i);
+    DType dice = re->Uniform<DType>(0, N);
+    Idx i = static_cast<Idx>(dice);
+    DType p = (dice - i) * avg;
+    if (p <= U[map(i)]) 
+        return map(i);
     else
-      return map(K[i]);
+        return map(K[i]);
   }
 };
 
@@ -147,8 +158,9 @@ template <
   bool replace = true>
 class CDFSampler {
 private:
+  RandomEngine *re;
   Idx N;
-  DType accum, taken;
+  DType accum, taken, eps;
   std::vector<DType> _prob;
   std::vector<DType> cdf;
   std::vector<bool> used;
@@ -189,18 +201,18 @@ public:
     rebuild(prob);
   }
 
-  CDFSampler(const std::vector<DType>& prob) {
+  CDFSampler(RandomEngine *re, const std::vector<DType>& prob, DType eps=1e-12): re(re), eps(eps) {
     reinit_state(prob);
   }
 
   ~CDFSampler() {}
 
-  inline Idx draw(RandomEngine *re) {
+  inline Idx draw() {
     if (!replace) {
       if (2 * taken >= accum)
         rebuild(_prob);
       while (true) {
-        DType p = re->Uniform<DType>(0., accum);
+        DType p = std::max(re->Uniform<DType>(0., accum), eps);
         Idx rst = map(std::lower_bound(cdf.begin(), cdf.end(), p) - cdf.begin() - 1);
         DType cap = _prob[rst];
         if (!used[rst]) {
@@ -210,7 +222,7 @@ public:
         }
       }
     }
-    DType p = re->Uniform<DType>(0., accum);
+    DType p = std::max(re->Uniform<DType>(0., accum), eps);
     return map(std::lower_bound(cdf.begin(), cdf.end(), p) - cdf.begin() - 1);
   }
   
@@ -222,6 +234,7 @@ template <
   bool replace = false>
 class TreeSampler {
 private:
+  RandomEngine *re;
   std::vector<DType> weight;
   Idx N, num_leafs;
 public:
@@ -233,7 +246,7 @@ public:
       weight[i] = weight[i * 2] + weight[i * 2 + 1];
   }    
 
-  TreeSampler(const std::vector<DType>& prob) {
+  TreeSampler(RandomEngine *re, const std::vector<DType>& prob): re(re) {
     num_leafs = 1;
     while (num_leafs < prob.size())
       num_leafs *= 2;
@@ -242,13 +255,16 @@ public:
     reinit_state(prob);
   }
 
-  inline Idx draw(RandomEngine *re) {
+  inline Idx draw() {
     Idx cur = 1;
     DType p = re->Uniform<DType>(0., weight[cur]);
-    DType accum = 0;
+    DType accum = 0.;
     while (cur < num_leafs) {
-      accum += weight[cur * 2];
-      cur = cur * 2 + static_cast<Idx>(p > accum);
+      DType pivot = accum + weight[cur * 2];
+      Idx shift = static_cast<Idx>(p > pivot);
+      cur = cur * 2 + shift;
+      if (shift == 1)
+        accum = pivot;
     }
     Idx rst = cur - num_leafs;
     if (!replace) {
@@ -264,7 +280,7 @@ public:
   }
 };
 
-const int num_categories = 10000;
+const int num_categories = 100000000;
 const int num_rolls = 100000000;
 const bool replace = true;
 std::vector<float> prob;
@@ -287,17 +303,17 @@ int main(int argc, char** argv) {
   std::cout << std::endl;
 #endif
   auto tic = clock::now();
-  AliasSampler<int, float, replace> as1(prob);
+  AliasSampler<int, float, replace> as1(&re, prob);
   millisec dur = clock::now() - tic;
   std::cout << "Alias sampler building time: " << dur.count() << " ms" << std::endl;
   std::fill(cnt.begin(), cnt.end(), 0);
   tic = clock::now();
   for (int i = 0; i < num_rolls; ++i) {
-    int dice = as1.draw(&re);
+    int dice = as1.draw();
     cnt[dice]++;
   }
   dur = clock::now() - tic;
-  std::cout << "Alias sampler dur: " << dur.count() << " ms" << std::endl;
+  std::cout << "Alias sampler duration: " << dur.count() << " ms" << std::endl;
 #ifdef _DEBUG
   for (int i = 0; i < num_categories; ++i)
     std::cout << cnt[i] / float(num_rolls) << " ";
@@ -305,17 +321,17 @@ int main(int argc, char** argv) {
 #endif
 
   tic = clock::now();
-  CDFSampler<int, float, replace> cs1(prob);
+  CDFSampler<int, float, replace> cs1(&re, prob);
   dur = clock::now() - tic;
   std::cout << "CDF sampler building time: " << dur.count() << " ms" << std::endl;
   std::fill(cnt.begin(), cnt.end(), 0);
   tic = clock::now();
   for (int i = 0; i < num_rolls; ++i) {
-    int dice = cs1.draw(&re);
+    int dice = cs1.draw();
     cnt[dice]++;
   }
   dur = clock::now() - tic;
-  std::cout << "CDF sampler dur: " << dur.count() << " ms" << std::endl;
+  std::cout << "CDF sampler duration: " << dur.count() << " ms" << std::endl;
 #ifdef _DEBUG
   for (int i = 0; i < num_categories; ++i)
     std::cout << cnt[i] / float(num_rolls) << " ";
@@ -323,21 +339,22 @@ int main(int argc, char** argv) {
 #endif
 
   tic = clock::now();
-  TreeSampler<int, float, replace> ts1(prob);
+  TreeSampler<int, float, replace> ts1(&re, prob);
   dur = clock::now() - tic;
   std::cout << "Tree sampler building time: " << dur.count() << " ms" << std::endl;
   std::fill(cnt.begin(), cnt.end(), 0);
   tic = clock::now();
   for (int i = 0; i < num_rolls; ++i) {
-    int dice = ts1.draw(&re);
+    int dice = ts1.draw();
     cnt[dice]++;
   }
   dur = clock::now() - tic;
-  std::cout << "Tree sampler dur: " << dur.count() << " ms" << std::endl;
+  std::cout << "Tree sampler duration: " << dur.count() << " ms" << std::endl;
 #ifdef _DEBUG
   for (int i = 0; i < num_categories; ++i)
     std::cout << cnt[i] / float(num_rolls) << " ";
   std::cout << std::endl;
 #endif
 
+  return 0;
 }
