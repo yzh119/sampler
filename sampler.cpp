@@ -47,7 +47,7 @@ class AliasSampler {
 private:
   RandomEngine *re;
   Idx N;
-  DType accum, taken, eps;        // accumulated likelihood
+  DType accum, taken;        // accumulated likelihood
   std::vector<Idx> K;             // alias table
   std::vector<DType> U;           // probability table
   std::vector<DType> _prob;       // category distribution
@@ -95,9 +95,9 @@ private:
       DType p_u = u_pair.second, p_o = o_pair.second;
       K[i_u] = i_o;
       U[i_u] = p_u;
-      if (p_o + p_u > 2 * avg + eps)
+      if (p_o + p_u > 2 * avg)
         over.push(std::make_pair(i_o, p_o + p_u - avg));
-      else if (p_o + p_u < 2 * avg - eps)
+      else if (p_o + p_u < 2 * avg)
         under.push(std::make_pair(i_o, p_o + p_u - avg));
       under.pop();
       over.pop();
@@ -113,7 +113,7 @@ public:
     rebuild(prob);
   }
 
-  AliasSampler(RandomEngine* re, const std::vector<DType>& prob, DType eps=1e-12): re(re), eps(eps) {
+  AliasSampler(RandomEngine* re, const std::vector<DType>& prob): re(re) {
     reinit_state(prob);
   }
 
@@ -160,7 +160,7 @@ class CDFSampler {
 private:
   RandomEngine *re;
   Idx N;
-  DType accum, taken, eps;
+  DType accum, taken;
   std::vector<DType> _prob;
   std::vector<DType> cdf;
   std::vector<bool> used;
@@ -201,13 +201,14 @@ public:
     rebuild(prob);
   }
 
-  CDFSampler(RandomEngine *re, const std::vector<DType>& prob, DType eps=1e-12): re(re), eps(eps) {
+  CDFSampler(RandomEngine *re, const std::vector<DType>& prob): re(re) {
     reinit_state(prob);
   }
 
   ~CDFSampler() {}
 
   inline Idx draw() {
+    DType eps = std::numeric_limits<DType>::min();
     if (!replace) {
       if (2 * taken >= accum)
         rebuild(_prob);
@@ -280,9 +281,9 @@ public:
   }
 };
 
-const int num_categories = 100000000;
-const int num_rolls = 100000000;
-const bool replace = true;
+const int num_categories = 10000000;
+const int num_rolls = 10000000;
+const bool replace = false;
 std::vector<float> prob;
 std::vector<int> cnt(num_categories, 0);
 
