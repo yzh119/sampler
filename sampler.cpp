@@ -244,9 +244,11 @@ public:
 
   inline Idx draw(RandomEngine *re) {
     Idx cur = 1;
+    DType p = re->Uniform<DType>(0., weight[cur]);
+    DType accum = 0;
     while (cur < num_leafs) {
-      DType p = re->Uniform<DType>(0., weight[cur]);   
-      cur = cur * 2 + static_cast<Idx>(p > weight[cur * 2]);
+      accum += weight[cur * 2];
+      cur = cur * 2 + static_cast<Idx>(p > accum);
     }
     Idx rst = cur - num_leafs;
     if (!replace) {
@@ -262,7 +264,7 @@ public:
   }
 };
 
-const int num_categories = 100000000;
+const int num_categories = 10000;
 const int num_rolls = 100000000;
 const bool replace = true;
 std::vector<float> prob;
